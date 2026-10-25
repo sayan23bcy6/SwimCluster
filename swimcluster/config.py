@@ -1,5 +1,5 @@
-"""
-config.py – All cluster settings loaded from environment variables and CLI args.
+﻿"""
+config.py â€“ All cluster settings loaded from environment variables and CLI args.
 
 Each setting has a reasonable default so a node can start without any
 configuration.  Config is a plain dataclass so it can be passed around
@@ -15,40 +15,40 @@ from typing import List, Optional
 
 @dataclass
 class Config:
-    # ── Identity ──────────────────────────────────────────────────────────────
+    # â”€â”€ Identity â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     node_id: str = ""                   # unique identifier, e.g. "node1"
     host: str = "0.0.0.0"              # UDP/TCP bind address
     port: int = 7946                    # base port (same for UDP gossip + TCP sync)
     http_port: int = 8080               # HTTP port for KV and metrics endpoints
 
-    # ── Seed nodes ────────────────────────────────────────────────────────────
+    # â”€â”€ Seed nodes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     # Comma-separated "host:port" strings the new node contacts over TCP on join.
     seeds: List[str] = field(default_factory=list)
 
-    # ── SWIM timing ───────────────────────────────────────────────────────────
+    # â”€â”€ SWIM timing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     protocol_period: float = 1.0        # seconds between probe rounds
     ping_timeout: float = 0.5          # wait for direct ACK
     ping_req_timeout: float = 1.0      # wait for indirect ACK via helpers
     suspicion_mult: int = 3            # suspicion timeout = suspicion_mult * protocol_period
     indirect_k: int = 3                # number of helpers for PING-REQ
 
-    # ── Gossip ────────────────────────────────────────────────────────────────
+    # â”€â”€ Gossip â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     gossip_fanout: int = 5             # max updates piggybacked on each outgoing message
     gossip_retransmit_mult: int = 4    # drop an update after retransmit_mult * log2(N) sends
 
-    # ── KV store ──────────────────────────────────────────────────────────────
+    # â”€â”€ KV store â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     kvstore_replicas: int = 150        # virtual nodes in consistent-hash ring
 
-    # ── Fault injection ───────────────────────────────────────────────────────
+    # â”€â”€ Fault injection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     fault_loss_prob: float = 0.0       # packet loss probability [0, 1]
     fault_delay_min: float = 0.0       # min artificial delay in seconds
     fault_delay_max: float = 0.0       # max artificial delay in seconds
 
-    # ── Agent / LLM ───────────────────────────────────────────────────────────
-    anthropic_api_key: str = ""        # from ANTHROPIC_API_KEY env var
-    agent_model: str = "claude-opus-4-5"
+    # â”€â”€ Agent / LLM â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    gemini_api_key: str = ""           # from GEMINI_API_KEY env var
+    agent_model: str = "gemini-2.0-flash-lite"
 
-    # ── Observability ─────────────────────────────────────────────────────────
+    # â”€â”€ Observability â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     metrics_path: str = "/metrics"
     event_log_path: str = "events.jsonl"  # append-only JSON-lines event log
 
@@ -75,8 +75,8 @@ def from_env(overrides: Optional[dict] = None) -> Config:
         fault_loss_prob=float(os.getenv("SWIM_FAULT_LOSS_PROB", "0.0")),
         fault_delay_min=float(os.getenv("SWIM_FAULT_DELAY_MIN", "0.0")),
         fault_delay_max=float(os.getenv("SWIM_FAULT_DELAY_MAX", "0.0")),
-        anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
-        agent_model=os.getenv("SWIM_AGENT_MODEL", "claude-opus-4-5"),
+        gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
+        agent_model=os.getenv("SWIM_AGENT_MODEL", "gemini-2.0-flash-lite"),
         event_log_path=os.getenv("SWIM_EVENT_LOG", "events.jsonl"),
     )
     if overrides:

@@ -5,7 +5,7 @@ The agent is READ-ONLY: it never changes cluster state.  It reads:
   1. A time-windowed slice of the JSON-lines event log.
   2. Prometheus metrics text from /metrics.
 
-It calls an LLM (Anthropic Claude by default) and requests a structured
+It calls an LLM (Google Gemini by default) and requests a structured
 JSON diagnosis with keys: summary, likely_cause, evidence, suggested_checks.
 
 The provider is hidden behind a small LLMProvider interface so tests can
@@ -41,39 +41,37 @@ class LLMProvider(ABC):
         ...
 
 
-class AnthropicProvider(LLMProvider):
+class GeminiProvider(LLMProvider):
     """
-    Calls the Anthropic Messages API using aiohttp (no SDK dependency).
+    Calls the Google Gemini generateContent REST API using aiohttp (no SDK
+    dependency).  Requires a GEMINI_API_KEY obtained from Google AI Studio.
     """
 
-    API_URL = "https://api.anthropic.com/v1/messages"
+    _BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 
-    def __init__(self, api_key: str, model: str = "claude-opus-4-5") -> None:
+    def __init__(self, api_key: str, model: str = "gemini-2.0-flash-lite") -> None:
         self._api_key = api_key
         self._model   = model
 
     async def complete(self, prompt: str) -> str:
-        headers = {
-            "x-api-key":         self._api_key,
-            "anthropic-version": "2023-06-01",
-            "content-type":      "application/json",
-        }
+        url = f"{self._BASE_URL}/{self._model}:generateContent?key={self._api_key}"
         payload = {
-            "model":      self._model,
-            "max_tokens": 1024,
-            "messages":   [{"role": "user", "content": prompt}],
+            "contents": [
+                {"role": "user", "parts": [{"text": prompt}]}
+            ],
+            "generationConfig": {"maxOutputTokens": 1024},
         }
         async with aiohttp.ClientSession() as session:
             async with session.post(
-                self.API_URL, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=30)
+                url, json=payload, timeout=aiohttp.ClientTimeout(total=30)
             ) as resp:
                 if resp.status != 200:
                     body = await resp.text()
                     raise RuntimeError(
-                        f"Anthropic API error {resp.status}: {body}"
+                        f"Gemini API error {resp.status}: {body}"
                     )
                 data = await resp.json()
-                return data["content"][0]["text"]
+                return data["candidates"][0]["content"]["parts"][0]["text"]
 
 
 class FakeLLMProvider(LLMProvider):

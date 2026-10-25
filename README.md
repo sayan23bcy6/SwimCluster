@@ -42,7 +42,7 @@ flowchart TD
     subgraph Infra
         PROM["Prometheus\n/metrics scrape"]
         GRAF["Grafana\ndashboard"]
-        LLM["Anthropic API\n(claude-opus-4-5)"]
+        LLM["Gemini API\n(gemini-2.0-flash-lite)"]
     end
 
     METRICS --> PROM --> GRAF
@@ -129,7 +129,7 @@ curl -X DELETE http://localhost:8081/admin/faults
 ### Run the AI diagnostics agent
 
 ```bash
-export ANTHROPIC_API_KEY="sk-ant-..."
+export GEMINI_API_KEY="AIza..."
 swimcluster agent --window 5m --metrics-url http://localhost:8081/metrics
 ```
 
@@ -161,7 +161,7 @@ swimcluster/
 ├── kvstore.py         consistent-hash KV store
 ├── faults.py          packet loss · delay · partitions
 ├── metrics.py         Prometheus counters/gauges/histogram
-├── agent.py           AI diagnostics (AnthropicProvider + FakeLLMProvider)
+├── agent.py           AI diagnostics (GeminiProvider + FakeLLMProvider)
 └── cli.py             swimcluster node / fault / agent commands
 tests/
 ├── test_messages.py
@@ -198,7 +198,7 @@ docs/design-notes.md
 | `SWIM_PING_REQ_TIMEOUT`   | `1.0`            | Indirect ACK timeout (s)           |
 | `SWIM_SUSPICION_MULT`     | `3`              | Suspicion timer multiplier         |
 | `SWIM_INDIRECT_K`         | `3`              | Number of indirect-probe helpers   |
-| `ANTHROPIC_API_KEY`       | `""`             | API key for the diagnostics agent  |
+| `GEMINI_API_KEY`          | `""`             | API key for the diagnostics agent  |
 
 ---
 

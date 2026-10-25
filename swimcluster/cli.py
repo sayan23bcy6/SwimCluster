@@ -111,16 +111,16 @@ async def _cmd_fault(args: argparse.Namespace) -> None:
 
 
 async def _cmd_agent(args: argparse.Namespace) -> None:
-    from swimcluster.agent import AnthropicProvider, DiagnosticsAgent, FakeLLMProvider
+    from swimcluster.agent import GeminiProvider, DiagnosticsAgent, FakeLLMProvider
 
-    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    api_key = os.getenv("GEMINI_API_KEY", "")
 
     if not api_key:
-        log.warning("ANTHROPIC_API_KEY not set – using FakeLLMProvider")
+        log.warning("GEMINI_API_KEY not set – using FakeLLMProvider")
         provider = FakeLLMProvider()
     else:
-        model    = os.getenv("SWIM_AGENT_MODEL", "claude-opus-4-5")
-        provider = AnthropicProvider(api_key, model)
+        model    = os.getenv("SWIM_AGENT_MODEL", "gemini-2.0-flash-lite")
+        provider = GeminiProvider(api_key, model)
 
     window = _parse_window(args.window)
     agent  = DiagnosticsAgent(
