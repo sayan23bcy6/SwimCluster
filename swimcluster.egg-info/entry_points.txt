@@ -1,0 +1,2 @@
+[console_scripts]
+swimcluster = swimcluster.cli:main

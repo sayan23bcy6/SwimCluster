@@ -1,0 +1,126 @@
+# ── SwimCluster docker-compose.yml ────────────────────────────────────────────
+#
+# 5 cluster nodes + Prometheus + Grafana.
+# Nodes discover each other via node1 acting as the seed.
+#
+# Usage:
+#   docker compose up --build
+#   docker compose down
+#
+# Inject a partition (from host):
+#   curl -X POST http://localhost:8081/admin/faults \
+#     -H 'Content-Type: application/json' \
+#     -d '{"partition_add": ["node1", "node3"]}'
+
+version: "3.9"
+
+networks:
+  swimnet:
+    driver: bridge
+
+services:
+  # ── Seed / node 1 ─────────────────────────────────────────────────────────
+  node1:
+    build: .
+    container_name: swimcluster_node1
+    networks: [swimnet]
+    environment:
+      SWIM_NODE_ID:   "node1"
+      SWIM_HOST:      "0.0.0.0"
+      SWIM_PORT:      "7946"
+      SWIM_HTTP_PORT: "8080"
+      SWIM_SEEDS:     ""          # seed has no upstream seed
+    ports:
+      - "8081:8080"               # expose HTTP on host port 8081
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ── Nodes 2-5 (join via node1) ────────────────────────────────────────────
+  node2:
+    build: .
+    container_name: swimcluster_node2
+    networks: [swimnet]
+    depends_on: [node1]
+    environment:
+      SWIM_NODE_ID:   "node2"
+      SWIM_HOST:      "0.0.0.0"
+      SWIM_PORT:      "7946"
+      SWIM_HTTP_PORT: "8080"
+      SWIM_SEEDS:     "node1:7946"
+    ports:
+      - "8082:8080"
+
+  node3:
+    build: .
+    container_name: swimcluster_node3
+    networks: [swimnet]
+    depends_on: [node1]
+    environment:
+      SWIM_NODE_ID:   "node3"
+      SWIM_HOST:      "0.0.0.0"
+      SWIM_PORT:      "7946"
+      SWIM_HTTP_PORT: "8080"
+      SWIM_SEEDS:     "node1:7946"
+    ports:
+      - "8083:8080"
+
+  node4:
+    build: .
+    container_name: swimcluster_node4
+    networks: [swimnet]
+    depends_on: [node1]
+    environment:
+      SWIM_NODE_ID:   "node4"
+      SWIM_HOST:      "0.0.0.0"
+      SWIM_PORT:      "7946"
+      SWIM_HTTP_PORT: "8080"
+      SWIM_SEEDS:     "node1:7946"
+    ports:
+      - "8084:8080"
+
+  node5:
+    build: .
+    container_name: swimcluster_node5
+    networks: [swimnet]
+    depends_on: [node1]
+    environment:
+      SWIM_NODE_ID:   "node5"
+      SWIM_HOST:      "0.0.0.0"
+      SWIM_PORT:      "7946"
+      SWIM_HTTP_PORT: "8080"
+      SWIM_SEEDS:     "node1:7946"
+    ports:
+      - "8085:8080"
+
+  # ── Prometheus ────────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: swimcluster_prometheus
+    networks: [swimnet]
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+
+  # ── Grafana ───────────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: swimcluster_grafana
+    networks: [swimnet]
+    depends_on: [prometheus]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: "swimcluster"
+      GF_USERS_ALLOW_SIGN_UP:     "false"
+    volumes:
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "3000:3000"
