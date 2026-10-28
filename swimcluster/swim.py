@@ -80,6 +80,7 @@ class SWIM:
 
         # Event log callback (set by node.py).
         self._event_log_cb = None
+        self._probe_task: Optional[asyncio.Task] = None
 
     @property
     def incarnation(self) -> int:
@@ -90,13 +91,21 @@ class SWIM:
 
     async def start(self) -> None:
         self._running = True
-        asyncio.get_event_loop().create_task(self._probe_loop())
+        self._probe_task = asyncio.create_task(self._probe_loop())
         log.info("SWIM failure detector started for %s", self._cfg.node_id)
 
     async def stop(self) -> None:
         self._running = False
-        for t in self._suspect_timers.values():
+        for t in list(self._suspect_timers.values()):
             t.cancel()
+        self._suspect_timers.clear()
+        if self._probe_task:
+            self._probe_task.cancel()
+            try:
+                await self._probe_task
+            except asyncio.CancelledError:
+                pass
+            self._probe_task = None
 
     def set_event_log(self, cb) -> None:
         """Register a callback(event_dict) for structured event logging."""
@@ -211,7 +220,7 @@ class SWIM:
 
         # Start the suspicion timer.
         timeout = self._cfg.suspicion_mult * self._cfg.protocol_period
-        task = asyncio.get_event_loop().create_task(
+        task = asyncio.create_task(
             self._suspicion_timer(member.node_id, member.incarnation, timeout)
         )
         self._suspect_timers[member.node_id] = task
@@ -386,7 +395,7 @@ class SWIM:
 
         if node_id == self._cfg.node_id:
             # Someone suspects us -- schedule a refutation.
-            asyncio.get_event_loop().create_task(self._self_refute(incarnation))
+            asyncio.create_task(self._self_refute(incarnation))
             return
 
         m = self._membership.get(node_id)
@@ -398,7 +407,7 @@ class SWIM:
             if node_id not in self._suspect_timers:
                 self._suspect_start[node_id] = time.time()
                 timeout = self._cfg.suspicion_mult * self._cfg.protocol_period
-                task = asyncio.get_event_loop().create_task(
+                task = asyncio.create_task(
                     self._suspicion_timer(node_id, incarnation, timeout)
                 )
                 self._suspect_timers[node_id] = task
@@ -474,7 +483,7 @@ class SWIM:
             # Self-refutation trigger (item B.6).
             if node_id_r == self._cfg.node_id:
                 if state_r in ("SUSPECT", "DEAD") and inc_r >= self._incarnation:
-                    asyncio.get_event_loop().create_task(
+                    asyncio.create_task(
                         self._self_refute(inc_r)
                     )
                 continue
