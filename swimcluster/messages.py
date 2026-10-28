@@ -144,11 +144,12 @@ def dead(sender_id: str, seq: int, node_id: str,
 
 
 def join(sender_id: str, seq: int,
-         host: str, port: int) -> Dict[str, Any]:
+         host: str, port: int, incarnation: int = 0) -> Dict[str, Any]:
     """JOIN is sent over TCP by a new node asking for the full member list."""
     m = _base(sender_id, seq, MsgType.JOIN)
     m["host"] = host
     m["port"] = port
+    m["incarnation"] = incarnation
     return m
 
 
