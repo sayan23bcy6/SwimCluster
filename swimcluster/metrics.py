@@ -1,11 +1,16 @@
 """
-metrics.py – Prometheus metrics exposed on /metrics.
+metrics.py -- Prometheus metrics exposed on /metrics.
 
 We use the official prometheus_client library.  All counters, gauges, and
 histograms are registered as module-level singletons so any module can
 import and increment them without dependency injection.
 
 The HTTP handler for /metrics is wired into the aiohttp server in node.py.
+
+Convergence metric:
+  swimcluster_convergence_time_seconds tracks "Time from first SUSPECT to DEAD
+  observed by this node".  It is observed once per DEAD event with the elapsed
+  seconds between the first SUSPECT event and the DEAD declaration.
 """
 
 from __future__ import annotations
@@ -20,7 +25,7 @@ from prometheus_client import (
     REGISTRY,
 )
 
-# ── Counters ──────────────────────────────────────────────────────────────────
+# -- Counters ------------------------------------------------------------------
 
 probes_sent = Counter(
     "swimcluster_probes_sent_total",
@@ -57,7 +62,7 @@ messages_dropped_malformed = Counter(
     "Messages dropped due to validation failure",
 )
 
-# ── Gauges ────────────────────────────────────────────────────────────────────
+# -- Gauges --------------------------------------------------------------------
 
 members_alive = Gauge(
     "swimcluster_members_alive",
@@ -74,16 +79,16 @@ members_dead = Gauge(
     "Current number of DEAD cluster members",
 )
 
-# ── Histograms ────────────────────────────────────────────────────────────────
+# -- Histograms ----------------------------------------------------------------
 
 convergence_time_seconds = Histogram(
     "swimcluster_convergence_time_seconds",
-    "Time from a node failure to all live nodes marking it DEAD",
+    "Time from first SUSPECT to DEAD observed by this node",
     buckets=(0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0),
 )
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# -- Helpers -------------------------------------------------------------------
 
 def update_member_gauges(alive: int, suspect: int, dead: int) -> None:
     """Convenience wrapper to update all three membership gauges at once."""

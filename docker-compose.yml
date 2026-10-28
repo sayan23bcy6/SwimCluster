@@ -1,4 +1,4 @@
-# ── SwimCluster docker-compose.yml ────────────────────────────────────────────
+# ── SwimCluster docker-compose.yml ─────────────────────────────────────────────
 #
 # 5 cluster nodes + Prometheus + Grafana.
 # Nodes discover each other via node1 acting as the seed.
@@ -11,92 +11,154 @@
 #   curl -X POST http://localhost:8081/admin/faults \
 #     -H 'Content-Type: application/json' \
 #     -d '{"partition_add": ["node1", "node3"]}'
-
-version: "3.9"
+#
+# Node HTTP ports:  node1=8081  node2=8082  node3=8083  node4=8084  node5=8085
+# Prometheus:       http://localhost:9090
+# Grafana:          http://localhost:3000 (admin / swimcluster)
 
 networks:
   swimnet:
     driver: bridge
 
+volumes:
+  node_data:
+
 services:
-  # ── Seed / node 1 ─────────────────────────────────────────────────────────
+  # ── Seed / node 1 ────────────────────────────────────────────────────────────
   node1:
     build: .
     container_name: swimcluster_node1
     networks: [swimnet]
     environment:
-      SWIM_NODE_ID:   "node1"
-      SWIM_HOST:      "0.0.0.0"
-      SWIM_PORT:      "7946"
-      SWIM_HTTP_PORT: "8080"
-      SWIM_SEEDS:     ""          # seed has no upstream seed
+      SWIM_NODE_ID:        "node1"
+      SWIM_HOST:           "0.0.0.0"
+      SWIM_ADVERTISE_HOST: "node1"    # advertise Docker service name as host
+      SWIM_PORT:           "7946"
+      SWIM_HTTP_PORT:      "8080"
+      SWIM_SEEDS:          ""          # seed has no upstream seed
+      SWIM_EVENT_LOG:      "/app/data/events-node1.jsonl"
     ports:
-      - "8081:8080"               # expose HTTP on host port 8081
+      - "8081:8080"                   # expose HTTP on host port 8081
+    volumes:
+      - ./data:/app/data
     healthcheck:
       test: ["CMD", "python", "-c",
              "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
       interval: 5s
       timeout: 3s
       retries: 5
+      start_period: 5s
 
-  # ── Nodes 2-5 (join via node1) ────────────────────────────────────────────
+  # ── Nodes 2-5 (join via node1) ───────────────────────────────────────────────
   node2:
     build: .
     container_name: swimcluster_node2
     networks: [swimnet]
-    depends_on: [node1]
+    depends_on:
+      node1:
+        condition: service_healthy
     environment:
-      SWIM_NODE_ID:   "node2"
-      SWIM_HOST:      "0.0.0.0"
-      SWIM_PORT:      "7946"
-      SWIM_HTTP_PORT: "8080"
-      SWIM_SEEDS:     "node1:7946"
+      SWIM_NODE_ID:        "node2"
+      SWIM_HOST:           "0.0.0.0"
+      SWIM_ADVERTISE_HOST: "node2"
+      SWIM_PORT:           "7946"
+      SWIM_HTTP_PORT:      "8080"
+      SWIM_SEEDS:          "node1:7946"
+      SWIM_EVENT_LOG:      "/app/data/events-node2.jsonl"
     ports:
       - "8082:8080"
+    volumes:
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
 
   node3:
     build: .
     container_name: swimcluster_node3
     networks: [swimnet]
-    depends_on: [node1]
+    depends_on:
+      node1:
+        condition: service_healthy
     environment:
-      SWIM_NODE_ID:   "node3"
-      SWIM_HOST:      "0.0.0.0"
-      SWIM_PORT:      "7946"
-      SWIM_HTTP_PORT: "8080"
-      SWIM_SEEDS:     "node1:7946"
+      SWIM_NODE_ID:        "node3"
+      SWIM_HOST:           "0.0.0.0"
+      SWIM_ADVERTISE_HOST: "node3"
+      SWIM_PORT:           "7946"
+      SWIM_HTTP_PORT:      "8080"
+      SWIM_SEEDS:          "node1:7946"
+      SWIM_EVENT_LOG:      "/app/data/events-node3.jsonl"
     ports:
       - "8083:8080"
+    volumes:
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
 
   node4:
     build: .
     container_name: swimcluster_node4
     networks: [swimnet]
-    depends_on: [node1]
+    depends_on:
+      node1:
+        condition: service_healthy
     environment:
-      SWIM_NODE_ID:   "node4"
-      SWIM_HOST:      "0.0.0.0"
-      SWIM_PORT:      "7946"
-      SWIM_HTTP_PORT: "8080"
-      SWIM_SEEDS:     "node1:7946"
+      SWIM_NODE_ID:        "node4"
+      SWIM_HOST:           "0.0.0.0"
+      SWIM_ADVERTISE_HOST: "node4"
+      SWIM_PORT:           "7946"
+      SWIM_HTTP_PORT:      "8080"
+      SWIM_SEEDS:          "node1:7946"
+      SWIM_EVENT_LOG:      "/app/data/events-node4.jsonl"
     ports:
       - "8084:8080"
+    volumes:
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
 
   node5:
     build: .
     container_name: swimcluster_node5
     networks: [swimnet]
-    depends_on: [node1]
+    depends_on:
+      node1:
+        condition: service_healthy
     environment:
-      SWIM_NODE_ID:   "node5"
-      SWIM_HOST:      "0.0.0.0"
-      SWIM_PORT:      "7946"
-      SWIM_HTTP_PORT: "8080"
-      SWIM_SEEDS:     "node1:7946"
+      SWIM_NODE_ID:        "node5"
+      SWIM_HOST:           "0.0.0.0"
+      SWIM_ADVERTISE_HOST: "node5"
+      SWIM_PORT:           "7946"
+      SWIM_HTTP_PORT:      "8080"
+      SWIM_SEEDS:          "node1:7946"
+      SWIM_EVENT_LOG:      "/app/data/events-node5.jsonl"
     ports:
       - "8085:8080"
+    volumes:
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
 
-  # ── Prometheus ────────────────────────────────────────────────────────────
+  # ── Prometheus ────────────────────────────────────────────────────────────────
   prometheus:
     image: prom/prometheus:v2.51.0
     container_name: swimcluster_prometheus
@@ -110,7 +172,7 @@ services:
       - "--storage.tsdb.path=/prometheus"
       - "--web.enable-lifecycle"
 
-  # ── Grafana ───────────────────────────────────────────────────────────────
+  # ── Grafana ───────────────────────────────────────────────────────────────────
   grafana:
     image: grafana/grafana:10.4.0
     container_name: swimcluster_grafana

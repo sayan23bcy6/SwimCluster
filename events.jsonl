@@ -1,0 +1,12 @@
+{"event": "SUSPECT", "node_id": "rn2", "incarnation": 0, "ts": 1793205069.3272417, "reporter": "rn3"}
+{"event": "SUSPECT", "node_id": "rn3", "incarnation": 0, "ts": 1793205069.5268927, "reporter": "rn2"}
+{"event": "DEAD", "node_id": "rn2", "incarnation": 0, "ts": 1793205069.7422476, "reporter": "rn3"}
+{"event": "DEAD", "node_id": "rn3", "incarnation": 0, "ts": 1793205069.9393218, "reporter": "rn2"}
+{"event": "SUSPECT", "node_id": "pnode2", "incarnation": 0, "ts": 1793205071.0400841, "reporter": "pnode1"}
+{"event": "SUSPECT", "node_id": "pnode1", "incarnation": 0, "ts": 1793205071.1229947, "reporter": "pnode2"}
+{"event": "DEAD", "node_id": "pnode2", "incarnation": 0, "ts": 1793205071.438802, "reporter": "pnode1"}
+{"event": "DEAD", "node_id": "pnode1", "incarnation": 0, "ts": 1793205071.5215435, "reporter": "pnode2"}
+{"event": "SUSPECT", "node_id": "rejoin2", "incarnation": 0, "ts": 1793205086.7281976, "reporter": "rejoin1"}
+{"event": "DEAD", "node_id": "rejoin2", "incarnation": 0, "ts": 1793205087.1431053, "reporter": "rejoin1"}
+{"event": "SUSPECT", "node_id": "rejoin1", "incarnation": 0, "ts": 1793205087.4931476, "reporter": "rejoin2"}
+{"event": "DEAD", "node_id": "rejoin1", "incarnation": 0, "ts": 1793205087.9088192, "reporter": "rejoin2"}

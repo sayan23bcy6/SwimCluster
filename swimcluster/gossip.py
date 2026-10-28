@@ -1,5 +1,5 @@
 """
-gossip.py – Piggyback membership updates on every outgoing message.
+gossip.py -- Piggyback membership updates on every outgoing message.
 
 Rather than sending dedicated gossip messages, SWIM piggybacks
 membership updates onto whatever messages are already going out
@@ -61,18 +61,23 @@ class GossipQueue:
         """
         Return up to fanout updates for the next outgoing message,
         incrementing their send counter and dropping exhausted items.
+
+        Items are sorted by sends ascending so the least-sent items are
+        always preferred (item 11), ensuring fast convergence for new events.
         """
         limit   = self._retransmit_limit(cluster_size)
+        # Sort queue by sends ascending so least-sent items come first.
+        sorted_items = sorted(self._queue, key=lambda it: it.sends)
         chosen  = []
         updated = deque()
 
-        for item in self._queue:
+        for item in sorted_items:
             if len(chosen) < self.fanout:
                 item.sends += 1
                 chosen.append(item.record)
                 if item.sends < limit:
                     updated.append(item)
-                # else: drop – sent enough times
+                # else: drop -- sent enough times
             else:
                 updated.append(item)
 

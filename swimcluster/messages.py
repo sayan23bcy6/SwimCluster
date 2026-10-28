@@ -1,5 +1,5 @@
 """
-messages.py – Message types, JSON encode/decode, and validation.
+messages.py -- Message types, JSON encode/decode, and validation.
 
 All SWIM messages travel as UTF-8 JSON so they are human-readable in
 logs and easy to inspect with tcpdump.  Validation is strict: any field
@@ -14,7 +14,7 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 
 
-# ── Message type constants ────────────────────────────────────────────────────
+# -- Message type constants ----------------------------------------------------
 
 class MsgType(str, Enum):
     PING         = "PING"          # direct probe
@@ -29,7 +29,11 @@ class MsgType(str, Enum):
     FAULT_SET    = "FAULT_SET"    # admin: set fault-injection parameters
 
 
-# ── Wire format ───────────────────────────────────────────────────────────────
+# Set of valid type strings for fast O(1) lookup in validate().
+_VALID_TYPES: frozenset = frozenset(t.value for t in MsgType)
+
+
+# -- Wire format ---------------------------------------------------------------
 
 def encode(msg: Dict[str, Any]) -> bytes:
     """Serialise a message dict to UTF-8 JSON bytes."""
@@ -39,7 +43,7 @@ def encode(msg: Dict[str, Any]) -> bytes:
 def decode(data: bytes) -> Optional[Dict[str, Any]]:
     """
     Deserialise raw bytes to a message dict.
-    Returns None if the data is not valid JSON – caller must drop the message.
+    Returns None if the data is not valid JSON -- caller must drop the message.
     """
     try:
         msg = json.loads(data.decode("utf-8"))
@@ -50,7 +54,7 @@ def decode(data: bytes) -> Optional[Dict[str, Any]]:
         return None
 
 
-# ── Message constructors ──────────────────────────────────────────────────────
+# -- Message constructors ------------------------------------------------------
 
 def _base(sender_id: str, seq: int, msg_type: MsgType) -> Dict[str, Any]:
     """Common header fields present in every message."""
@@ -163,7 +167,7 @@ def fault_set(sender_id: str, seq: int, params: Dict[str, Any]) -> Dict[str, Any
     return m
 
 
-# ── Validation ────────────────────────────────────────────────────────────────
+# -- Validation ----------------------------------------------------------------
 
 # Required fields for each message type; values are (field_name, expected_type).
 _REQUIRED: Dict[str, List[tuple]] = {
@@ -185,11 +189,17 @@ _BASE_FIELDS: List[tuple] = [
     ("seq", int),
 ]
 
+# Valid gossip record state values.
+_VALID_GOSSIP_STATES: frozenset = frozenset({"ALIVE", "SUSPECT", "DEAD"})
+
 
 def validate(msg: Dict[str, Any]) -> bool:
     """
     Return True only when every required field is present and has the correct
     type.  Returning False signals the caller to drop the message silently.
+
+    Also validates that the message type is one of the known MsgType values
+    (item 10).
     """
     if not isinstance(msg, dict):
         return False
@@ -200,7 +210,11 @@ def validate(msg: Dict[str, Any]) -> bool:
         if val is None or not isinstance(val, expected_type):
             return False
 
+    # Reject unknown message types (item 10).
     msg_type = msg.get("type")
+    if msg_type not in _VALID_TYPES:
+        return False
+
     type_fields = _REQUIRED.get(msg_type, [])
 
     for field_name, expected_type in type_fields:
@@ -211,7 +225,38 @@ def validate(msg: Dict[str, Any]) -> bool:
     return True
 
 
-# ── Membership update record (used in gossip payloads) ────────────────────────
+def validate_gossip_records(gossip: list) -> List[Dict[str, Any]]:
+    """
+    Validate a gossip payload list, returning only well-formed records.
+
+    Each record must be a dict with:
+      id    (str)
+      host  (str)
+      port  (int)
+      state (one of ALIVE/SUSPECT/DEAD)
+      inc   (int)
+
+    Malformed records are dropped individually (item 10).
+    """
+    valid = []
+    if not isinstance(gossip, list):
+        return valid
+    for rec in gossip:
+        if not isinstance(rec, dict):
+            continue
+        try:
+            if (isinstance(rec.get("id"), str) and
+                    isinstance(rec.get("host"), str) and
+                    isinstance(rec.get("port"), int) and
+                    rec.get("state") in _VALID_GOSSIP_STATES and
+                    isinstance(rec.get("inc"), int)):
+                valid.append(rec)
+        except Exception:
+            continue
+    return valid
+
+
+# -- Membership update record (used in gossip payloads) ------------------------
 
 def member_record(node_id: str, host: str, port: int,
                   state: str, incarnation: int) -> Dict[str, Any]:

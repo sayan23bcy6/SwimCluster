@@ -1,8 +1,9 @@
 """
-agent.py – AI diagnostics agent for SwimCluster.
+agent.py -- AI diagnostics agent for SwimCluster.
 
 The agent is READ-ONLY: it never changes cluster state.  It reads:
-  1. A time-windowed slice of the JSON-lines event log.
+  1. A time-windowed slice of the JSON-lines event log (one file or a
+     glob pattern / directory of event files).
   2. Prometheus metrics text from /metrics.
 
 It calls an LLM (Google Gemini by default) and requests a structured
@@ -10,13 +11,19 @@ JSON diagnosis with keys: summary, likely_cause, evidence, suggested_checks.
 
 The provider is hidden behind a small LLMProvider interface so tests can
 inject a fake without network calls.
+
+API key security: the Gemini API key is sent in the ``x-goog-api-key``
+request header, never in the URL query string.  Exception messages never
+include the key value.
 """
 
 from __future__ import annotations
 
 import asyncio
+import glob as glob_module
 import json
 import logging
+import os
 import time
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -27,7 +34,7 @@ import aiohttp
 log = logging.getLogger(__name__)
 
 
-# ── LLM provider interface ────────────────────────────────────────────────────
+# -- LLM provider interface ----------------------------------------------------
 
 class LLMProvider(ABC):
     """
@@ -45,6 +52,9 @@ class GeminiProvider(LLMProvider):
     """
     Calls the Google Gemini generateContent REST API using aiohttp (no SDK
     dependency).  Requires a GEMINI_API_KEY obtained from Google AI Studio.
+
+    The key is sent in the ``x-goog-api-key`` header (item 12).  It never
+    appears in the URL or in exception messages.
     """
 
     _BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
@@ -54,21 +64,27 @@ class GeminiProvider(LLMProvider):
         self._model   = model
 
     async def complete(self, prompt: str) -> str:
-        url = f"{self._BASE_URL}/{self._model}:generateContent?key={self._api_key}"
+        url = f"{self._BASE_URL}/{self._model}:generateContent"
         payload = {
             "contents": [
                 {"role": "user", "parts": [{"text": prompt}]}
             ],
             "generationConfig": {"maxOutputTokens": 1024},
         }
+        headers = {
+            "x-goog-api-key": self._api_key,
+            "Content-Type": "application/json",
+        }
         async with aiohttp.ClientSession() as session:
             async with session.post(
-                url, json=payload, timeout=aiohttp.ClientTimeout(total=30)
+                url, json=payload, headers=headers,
+                timeout=aiohttp.ClientTimeout(total=30)
             ) as resp:
                 if resp.status != 200:
                     body = await resp.text()
+                    # Do NOT include self._api_key in the error message.
                     raise RuntimeError(
-                        f"Gemini API error {resp.status}: {body}"
+                        f"Gemini API error {resp.status}: {body[:500]}"
                     )
                 data = await resp.json()
                 return data["candidates"][0]["content"]["parts"][0]["text"]
@@ -81,36 +97,64 @@ class FakeLLMProvider(LLMProvider):
 
     async def complete(self, prompt: str) -> str:
         return json.dumps({
-            "summary":          "Test diagnosis – no real LLM called.",
+            "summary":          "Test diagnosis -- no real LLM called.",
             "likely_cause":     "Fault injection or test scenario.",
             "evidence":         ["Event log shows SUSPECT events."],
             "suggested_checks": ["Check node health", "Review fault config"],
         })
 
 
-# ── Event log reader ──────────────────────────────────────────────────────────
+# -- Event log reader ----------------------------------------------------------
+
+def _expand_event_paths(path_or_glob: str) -> List[str]:
+    """
+    Return a list of file paths from a single path, glob pattern, or directory.
+
+    Examples:
+      "events.jsonl"         -> ["events.jsonl"]
+      "/app/data/events-*.jsonl" -> all matching files
+      "/app/data"            -> all *.jsonl files in that directory
+    """
+    p = Path(path_or_glob)
+    if p.is_dir():
+        return sorted(str(f) for f in p.glob("*.jsonl"))
+    expanded = glob_module.glob(path_or_glob)
+    if expanded:
+        return sorted(expanded)
+    # Treat as a literal path (may not exist yet -- caller handles that).
+    return [path_or_glob]
+
 
 def read_events(path: str, window_seconds: float) -> List[Dict[str, Any]]:
     """
-    Return all events from 'path' whose 'ts' field falls within the last
-    'window_seconds' seconds.  Lines that are not valid JSON are skipped.
+    Return all events from 'path' (file, glob, or directory) whose 'ts' field
+    falls within the last 'window_seconds' seconds.
+
+    Lines that are not valid JSON are skipped.  Multiple files are merged and
+    returned in chronological order (item 13).
     """
     cutoff = time.time() - window_seconds
     events: List[Dict[str, Any]] = []
-    try:
-        with open(path, "r", encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    evt = json.loads(line)
-                    if evt.get("ts", 0) >= cutoff:
-                        events.append(evt)
-                except json.JSONDecodeError:
-                    pass
-    except FileNotFoundError:
-        log.warning("Event log not found: %s", path)
+    file_paths = _expand_event_paths(path)
+
+    for fpath in file_paths:
+        try:
+            with open(fpath, "r", encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        evt = json.loads(line)
+                        if evt.get("ts", 0) >= cutoff:
+                            events.append(evt)
+                    except json.JSONDecodeError:
+                        pass
+        except FileNotFoundError:
+            log.warning("Event log not found: %s", fpath)
+
+    # Sort by timestamp for deterministic output when merging multiple files.
+    events.sort(key=lambda e: e.get("ts", 0))
     return events
 
 
@@ -127,21 +171,21 @@ async def read_metrics(metrics_url: str) -> str:
         return ""
 
 
-# ── Prompt builder ────────────────────────────────────────────────────────────
+# -- Prompt builder ------------------------------------------------------------
 
 _SYSTEM_PROMPT = """\
 You are an expert distributed-systems reliability engineer.
-You are diagnosing issues in a SwimCluster – a cluster using the SWIM protocol.
+You are diagnosing issues in a SwimCluster -- a cluster using the SWIM protocol.
 
 Below you will find:
   - Recent cluster events (JSON lines)
   - Current Prometheus metrics snapshot
 
 Analyse the data and reply with ONLY a single JSON object with these keys:
-  summary          – one sentence describing what happened
-  likely_cause     – the most probable root cause
-  evidence         – list of evidence strings from the data
-  suggested_checks – list of actionable checks the operator should perform
+  summary          -- one sentence describing what happened
+  likely_cause     -- the most probable root cause
+  evidence         -- list of evidence strings from the data
+  suggested_checks -- list of actionable checks the operator should perform
 
 Do not include any text outside the JSON object.
 """
@@ -156,7 +200,7 @@ def _build_prompt(events: List[Dict], metrics_text: str) -> str:
     )
 
 
-# ── Main agent ────────────────────────────────────────────────────────────────
+# -- Main agent ----------------------------------------------------------------
 
 class DiagnosticsAgent:
     """
@@ -165,7 +209,7 @@ class DiagnosticsAgent:
 
     def __init__(self, provider: LLMProvider,
                  event_log_path: str = "events.jsonl",
-                 metrics_url: str = "http://localhost:8080/metrics") -> None:
+                 metrics_url: str = "http://localhost:8081/metrics") -> None:
         self._provider     = provider
         self._event_log    = event_log_path
         self._metrics_url  = metrics_url

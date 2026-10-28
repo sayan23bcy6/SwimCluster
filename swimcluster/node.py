@@ -1,11 +1,11 @@
 """
-node.py – Wires SWIM, transport, KV store, metrics, and HTTP together.
+node.py -- Wires SWIM, transport, KV store, metrics, and HTTP together.
 
 The Node class owns the event loop lifecycle.  It starts:
-  • The transport (UDP + TCP).
-  • The SWIM failure detector.
-  • The aiohttp HTTP server for KV and admin endpoints.
-  • A periodic metrics gauge update.
+  * The transport (UDP + TCP).
+  * The SWIM failure detector.
+  * The aiohttp HTTP server for KV and admin endpoints.
+  * A periodic metrics gauge update.
 
 All inter-module communication happens through explicit method calls; no
 global state is shared between modules.
@@ -50,9 +50,10 @@ class Node:
         # Shared membership list.
         self._membership = MembershipList(cfg.node_id)
 
-        # Add ourselves to the member list as ALIVE.
+        # Add ourselves to the member list as ALIVE using the *advertised* host.
+        advertise_host = cfg.effective_advertise_host()
         self._membership.mark_alive(
-            cfg.node_id, cfg.host, cfg.port, incarnation=0
+            cfg.node_id, advertise_host, cfg.port, incarnation=0
         )
 
         # SWIM failure detector.
@@ -67,6 +68,7 @@ class Node:
         self._runner: Optional[web.AppRunner] = None
 
         # TCP reply staging: the SWIM layer sets this before returning from _on_join.
+        # RealTransport also has this attribute; we keep it in sync during dispatch.
         self._pending_tcp_reply: Optional[Dict] = None
 
         # Event log file.
@@ -74,7 +76,7 @@ class Node:
 
         self._setup_routes()
 
-    # ── Lifecycle ─────────────────────────────────────────────────────────────
+    # -- Lifecycle -------------------------------------------------------------
 
     async def start(self) -> None:
         # Register incoming message handler.
@@ -104,7 +106,7 @@ class Node:
         if self._runner:
             await self._runner.cleanup()
 
-    # ── Join ──────────────────────────────────────────────────────────────────
+    # -- Join ------------------------------------------------------------------
 
     async def _join_seed(self, seed: str) -> None:
         """Contact a seed node over TCP to get the initial membership list."""
@@ -115,8 +117,11 @@ class Node:
             log.error("Invalid seed address: %s", seed)
             return
 
+        # Use the advertised host/port in the JOIN message so peers know
+        # how to reach us.
+        advertise_host = self._cfg.effective_advertise_host()
         local_m = self._membership.get(self._cfg.node_id)
-        addr_host = local_m.host if local_m else self._cfg.host
+        addr_host = local_m.host if local_m else advertise_host
         addr_port = local_m.port if local_m else self._cfg.port
 
         msg = messages.join(self._cfg.node_id, 1, addr_host, addr_port)
@@ -127,7 +132,7 @@ class Node:
         else:
             log.warning("No valid JOIN_ACK from seed %s:%s", host, port)
 
-    # ── Message dispatch ──────────────────────────────────────────────────────
+    # -- Message dispatch ------------------------------------------------------
 
     async def _dispatch(self, msg: Dict[str, Any],
                         addr: Tuple[str, int]) -> None:
@@ -140,10 +145,10 @@ class Node:
         # If SWIM produced a reply (e.g. for PING or JOIN), send it.
         if reply is not None:
             if mtype == messages.MsgType.JOIN.value:
-                # TCP reply – store it for the transport to pick up.
-                if hasattr(self._transport, "_pending_tcp_reply"):
-                    self._transport._pending_tcp_reply = reply  # type: ignore[union-attr]
-                # Also store here for InMemoryTransport test path.
+                # TCP reply -- store it for the transport to pick up.
+                # RealTransport has _pending_tcp_reply defined in __init__.
+                self._transport._pending_tcp_reply = reply  # type: ignore[union-attr]
+                # Also store on InMemoryTransport path (uses _tcp_reply attr).
                 if hasattr(self._transport, "_tcp_reply"):
                     self._transport._tcp_reply = reply  # type: ignore[union-attr]
             else:
@@ -156,7 +161,7 @@ class Node:
                      messages.MsgType.JOIN_ACK.value):
             self._kv.on_membership_change(self._membership.all_members())
 
-    # ── HTTP Routes ───────────────────────────────────────────────────────────
+    # -- HTTP Routes -----------------------------------------------------------
 
     def _setup_routes(self) -> None:
         self._app.router.add_get("/health",          self._handle_health)
@@ -232,7 +237,7 @@ class Node:
         self._fault.clear_all()
         return web.json_response({"status": "cleared"})
 
-    # ── Internal helpers ──────────────────────────────────────────────────────
+    # -- Internal helpers ------------------------------------------------------
 
     async def _metrics_loop(self) -> None:
         """Refresh Prometheus gauges every protocol period."""
@@ -249,7 +254,7 @@ class Node:
         except OSError as exc:
             log.warning("Could not write event log: %s", exc)
 
-    # ── Public accessors for tests ────────────────────────────────────────────
+    # -- Public accessors for tests --------------------------------------------
 
     @property
     def membership(self) -> MembershipList:

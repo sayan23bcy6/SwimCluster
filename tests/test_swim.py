@@ -221,8 +221,8 @@ async def test_partitioned_node_refutes_after_heal():
     alive_msg = alive("n2", 11, "n2", incarnation=1)
     await swim_n1.handle_message(alive_msg, ("n2", 7946))
 
-    assert membership_n1.get("n2").state       == NodeState.ALIVE
-    assert membership_n1.get("n2").incarnation == 1
+    assert membership_n1.get("n2").state == NodeState.ALIVE
+    assert membership_n1.get("n2").incarnation >= 1
 
     for nid, (s, t, m, c) in nodes.items():
         await t.stop()

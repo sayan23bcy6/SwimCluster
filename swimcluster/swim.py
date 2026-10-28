@@ -1,5 +1,5 @@
 """
-swim.py – SWIM failure detector: probe, indirect probe, suspect/dead logic.
+swim.py -- SWIM failure detector: probe, indirect probe, suspect/dead logic.
 
 Protocol walk-through (one protocol period):
   1. Pick a random ALIVE/SUSPECT member to probe (the target).
@@ -7,7 +7,7 @@ Protocol walk-through (one protocol period):
   3. If no ACK: send PING_REQ to k random helpers (not the target itself).
      Each helper pings the target and relays the ACK.
   4. If still no ACK from any helper: mark target SUSPECT and start
-     the suspicion timer (suspicion_mult × protocol_period).
+     the suspicion timer (suspicion_mult x protocol_period).
   5. If the timer expires before a refutation arrives: mark DEAD and gossip.
 
 Refutation: a node that sees itself marked SUSPECT increments its
@@ -41,10 +41,10 @@ class SWIM:
     SWIM failure-detector state machine.
 
     Owns:
-    • The membership list (source of truth for this node's view).
-    • The gossip queue (what gets piggybacked on outgoing messages).
-    • Probe scheduling loop.
-    • Incoming message dispatch.
+    * The membership list (source of truth for this node's view).
+    * The gossip queue (what gets piggybacked on outgoing messages).
+    * Probe scheduling loop.
+    * Incoming message dispatch.
     """
 
     def __init__(self, cfg: Config, transport: BaseTransport,
@@ -54,26 +54,28 @@ class SWIM:
         self._membership  = membership
         self._gossip      = GossipQueue(cfg.gossip_fanout, cfg.gossip_retransmit_mult)
 
-        # Sequence counter – monotonically increasing per sender.
+        # Sequence counter -- monotonically increasing per sender.
         self._seq         = 0
 
-        # Pending direct pings: seq → asyncio.Event (set when ACK arrives).
+        # Pending direct pings: seq -> asyncio.Event (set when ACK arrives).
         self._pending_pings: Dict[int, asyncio.Event] = {}
 
-        # Pending indirect pings: seq → asyncio.Event.
+        # Pending indirect pings: seq -> asyncio.Event.
         self._pending_indirect: Dict[int, asyncio.Event] = {}
 
-        # Active suspicion timers: node_id → asyncio.Task.
+        # Active suspicion timers: node_id -> asyncio.Task.
         self._suspect_timers: Dict[str, asyncio.Task] = {}
 
-        # Convergence tracking: node_id → time when first suspected.
+        # Convergence tracking: node_id -> time when first suspected.
         self._suspect_start: Dict[str, float] = {}
 
         # Running flag.
         self._running = False
 
         # Local member's current incarnation (for self-refutation).
-        self._incarnation = 0
+        # Initialize to max(0, current unix time) so a restarted node always
+        # has a higher incarnation than its previous run (item B.5).
+        self._incarnation = max(0, int(time.time()))
 
         # Probing round-robin shuffle.
         self._probe_index = 0
@@ -81,7 +83,7 @@ class SWIM:
         # Event log callback (set by node.py).
         self._event_log_cb = None
 
-    # ── Lifecycle ─────────────────────────────────────────────────────────────
+    # -- Lifecycle -------------------------------------------------------------
 
     async def start(self) -> None:
         self._running = True
@@ -97,7 +99,7 @@ class SWIM:
         """Register a callback(event_dict) for structured event logging."""
         self._event_log_cb = cb
 
-    # ── Probe loop ────────────────────────────────────────────────────────────
+    # -- Probe loop ------------------------------------------------------------
 
     async def _probe_loop(self) -> None:
         """Main SWIM protocol loop: one probe per protocol period."""
@@ -129,18 +131,19 @@ class SWIM:
 
         gossip_payload = self._gossip.get_updates(len(targets) + 1)
         msg = messages.ping(self._cfg.node_id, seq, target.node_id, gossip_payload)
-        await self._transport.send_udp(msg, target.addr())
+        await self._transport.send_udp(msg, target.addr(),
+                                       target_node_id=target.node_id)
 
         # Wait for direct ACK.
         try:
             await asyncio.wait_for(event.wait(), self._cfg.ping_timeout)
-            return  # Got ACK – target is alive.
+            return  # Got ACK -- target is alive.
         except asyncio.TimeoutError:
             pass
         finally:
             self._pending_pings.pop(seq, None)
 
-        # ── Indirect probe ────────────────────────────────────────────────────
+        # -- Indirect probe ----------------------------------------------------
         metrics.probes_failed.inc()
         helpers = [
             m for m in targets
@@ -158,28 +161,34 @@ class SWIM:
                 preq = messages.ping_req(
                     self._cfg.node_id, indirect_seq, target.node_id, gp
                 )
-                await self._transport.send_udp(preq, helper.addr())
+                await self._transport.send_udp(preq, helper.addr(),
+                                               target_node_id=helper.node_id)
 
             try:
                 await asyncio.wait_for(indirect_event.wait(),
                                        self._cfg.ping_req_timeout)
-                return  # A helper got through – target is alive.
+                return  # A helper got through -- target is alive.
             except asyncio.TimeoutError:
                 pass
             finally:
                 self._pending_indirect.pop(indirect_seq, None)
 
-        # ── Suspect the target ────────────────────────────────────────────────
+        # -- Suspect the target ------------------------------------------------
         self._suspect_node(target)
 
-    # ── Suspect / Dead transitions ────────────────────────────────────────────
+    # -- Suspect / Dead transitions --------------------------------------------
 
     def _suspect_node(self, member: Member) -> None:
-        """Transition a member to SUSPECT and start the suspicion timer."""
+        """Transition a member to SUSPECT and start the suspicion timer.
+
+        Skips only if the member is currently SUSPECT *and* a timer already
+        exists (item B.4: re-suspicion must be allowed after refutation).
+        """
         if member.state == NodeState.DEAD:
             return
-        if member.node_id in self._suspect_timers:
-            return  # already suspected
+        # Only skip if already suspected with an active timer.
+        if member.state == NodeState.SUSPECT and member.node_id in self._suspect_timers:
+            return
 
         changed = self._membership.mark_suspect(
             member.node_id, member.incarnation
@@ -212,10 +221,12 @@ class SWIM:
         await asyncio.sleep(timeout)
         m = self._membership.get(node_id)
         if m is None or m.state == NodeState.DEAD:
+            self._suspect_timers.pop(node_id, None)
             return
         # If the node refuted (incarnation bumped), do not mark dead.
         if m.incarnation > incarnation:
-            log.info("Node %s refuted suspicion – not marking dead", node_id)
+            log.info("Node %s refuted suspicion -- not marking dead", node_id)
+            self._suspect_timers.pop(node_id, None)
             return
 
         self._mark_dead(node_id, incarnation)
@@ -230,7 +241,10 @@ class SWIM:
         elapsed = time.time() - self._suspect_start.pop(node_id, time.time())
         metrics.convergence_time_seconds.observe(elapsed)
 
-        self._suspect_timers.pop(node_id, None)
+        # Cancel and remove suspicion timer (item B.4).
+        if t := self._suspect_timers.pop(node_id, None):
+            t.cancel()
+
         log.error("Node %s is DEAD (incarnation=%d, convergence=%.2fs)",
                   node_id, incarnation, elapsed)
         self._log_event("DEAD", node_id, incarnation)
@@ -240,7 +254,7 @@ class SWIM:
             self._enqueue_gossip(m)
         self._update_member_gauges()
 
-    # ── Incoming message handler ──────────────────────────────────────────────
+    # -- Incoming message handler ----------------------------------------------
 
     async def handle_message(self, msg: Dict[str, Any],
                              addr: Tuple[str, int]) -> Optional[Dict[str, Any]]:
@@ -321,16 +335,24 @@ class SWIM:
 
         gp  = self._gossip.get_updates(len(self._membership.probeable_members()) + 1)
         ping_m = messages.ping(self._cfg.node_id, seq, target_id, gp)
-        await self._transport.send_udp(ping_m, target_m.addr())
+        await self._transport.send_udp(ping_m, target_m.addr(),
+                                       target_node_id=target_m.node_id)
+
+        # Sender node_id for the relay ACK.
+        sender_id = msg.get("sender", "")
+        sender_m  = self._membership.get(sender_id)
 
         try:
             await asyncio.wait_for(event.wait(), self._cfg.ping_timeout)
             # Relay success back to the original sender using their seq.
             gp2  = self._gossip.get_updates(len(self._membership.probeable_members()) + 1)
             relay = messages.ack(self._cfg.node_id, original_seq, target_id, gp2)
-            await self._transport.send_udp(relay, addr)
+            # Send relay to the ACK recipient (original sender).
+            relay_node_id = sender_id if sender_id else ""
+            await self._transport.send_udp(relay, addr,
+                                           target_node_id=relay_node_id)
         except asyncio.TimeoutError:
-            pass  # Silence – originator will timeout on its own.
+            pass  # Silence -- originator will timeout on its own.
         finally:
             self._pending_pings.pop(seq, None)
 
@@ -340,16 +362,17 @@ class SWIM:
         incarnation = msg["incarnation"]
 
         if node_id == self._cfg.node_id:
-            return  # Our own broadcast echoed back – ignore.
+            return  # Our own broadcast echoed back -- ignore.
 
         m = self._membership.get(node_id)
         host = m.host if m else msg.get("sender", "")
         port = m.port if m else 0
         changed = self._membership.mark_alive(node_id, host, port, incarnation)
         if changed:
-            # Cancel any outstanding suspicion timer.
+            # Cancel and remove any outstanding suspicion timer (item B.4).
             if t := self._suspect_timers.pop(node_id, None):
                 t.cancel()
+            self._suspect_start.pop(node_id, None)
             self._enqueue_gossip(self._membership.get(node_id))
             self._update_member_gauges()
 
@@ -359,7 +382,7 @@ class SWIM:
         incarnation = msg["incarnation"]
 
         if node_id == self._cfg.node_id:
-            # Someone suspects us – schedule a refutation.
+            # Someone suspects us -- schedule a refutation.
             asyncio.get_event_loop().create_task(self._self_refute(incarnation))
             return
 
@@ -409,23 +432,64 @@ class SWIM:
         self._membership.load_from_list(msg.get("members", []))
         self._update_member_gauges()
 
-    # ── Gossip helpers ────────────────────────────────────────────────────────
+    # -- Gossip helpers --------------------------------------------------------
 
     def _apply_gossip(self, updates: list) -> None:
-        """Merge piggybacked membership updates into the local view."""
+        """Merge piggybacked membership updates into the local view.
+
+        If a record for the local node arrives with state SUSPECT or DEAD
+        at an incarnation >= ours, trigger self-refutation (item B.6).
+        Drops individual malformed records while keeping valid ones (item 10).
+        """
+        valid_states = {"ALIVE", "SUSPECT", "DEAD"}
         for rec in updates:
+            # Validate the gossip record (item 10).
+            if not isinstance(rec, dict):
+                continue
+            try:
+                node_id_r = rec["id"]
+                host_r    = rec["host"]
+                port_r    = rec["port"]
+                state_r   = rec["state"]
+                inc_r     = rec["inc"]
+            except KeyError:
+                continue
+            if not isinstance(node_id_r, str):
+                continue
+            if not isinstance(host_r, str):
+                continue
+            if not isinstance(port_r, int):
+                continue
+            if state_r not in valid_states:
+                continue
+            if not isinstance(inc_r, int):
+                continue
+
+            # Self-refutation trigger (item B.6).
+            if node_id_r == self._cfg.node_id:
+                if state_r in ("SUSPECT", "DEAD") and inc_r >= self._incarnation:
+                    asyncio.get_event_loop().create_task(
+                        self._self_refute(inc_r)
+                    )
+                continue
+
             try:
                 m = Member.from_dict({
-                    "id":          rec["id"],
-                    "host":        rec["host"],
-                    "port":        rec["port"],
-                    "state":       rec["state"],
-                    "incarnation": rec["inc"],
+                    "id":          node_id_r,
+                    "host":        host_r,
+                    "port":        port_r,
+                    "state":       state_r,
+                    "incarnation": inc_r,
                 })
                 changed = self._membership.upsert(m)
                 if changed:
                     self._enqueue_gossip(m)
                     self._update_member_gauges()
+                    # Cancel suspicion timer if ALIVE record arrived (item B.4).
+                    if m.state == NodeState.ALIVE:
+                        if t := self._suspect_timers.pop(m.node_id, None):
+                            t.cancel()
+                        self._suspect_start.pop(m.node_id, None)
             except (KeyError, ValueError):
                 pass
 
@@ -439,7 +503,7 @@ class SWIM:
         )
         self._gossip.enqueue(rec)
 
-    # ── Self-refutation ───────────────────────────────────────────────────────
+    # -- Self-refutation -------------------------------------------------------
 
     async def _maybe_refute(self) -> None:
         """Check if we are suspected and refute if so."""
@@ -451,32 +515,44 @@ class SWIM:
         """
         Increment our incarnation number and broadcast ALIVE.
         Higher incarnation overrides the SUSPECT state on all peers.
+
+        Also enqueues our own ALIVE record in gossip so it piggybacks
+        on the next outgoing messages (item B.6).
+
+        Broadcasts to ALIVE and SUSPECT members (item B.6 -- not only ALIVE).
         """
         if self._incarnation <= suspected_at:
             self._incarnation = suspected_at + 1
 
         metrics.refutations.inc()
-        log.info("Refuting suspicion – broadcasting ALIVE (incarnation=%d)",
+        log.info("Refuting suspicion -- broadcasting ALIVE (incarnation=%d)",
                  self._incarnation)
         self._log_event("ALIVE_REFUTATION", self._cfg.node_id, self._incarnation)
 
         # Update our own entry.
         local_m = self._membership.get(self._cfg.node_id)
-        if local_m:
-            self._membership.mark_alive(
-                self._cfg.node_id, local_m.host, local_m.port, self._incarnation
-            )
+        advertise_host = self._cfg.effective_advertise_host()
+        self_host = local_m.host if local_m else advertise_host
+        self_port = local_m.port if local_m else self._cfg.port
+        self._membership.mark_alive(
+            self._cfg.node_id, self_host, self_port, self._incarnation
+        )
+
+        # Enqueue our ALIVE record in gossip (item B.6).
+        self_m = self._membership.get(self._cfg.node_id)
+        self._enqueue_gossip(self_m)
 
         gp  = self._gossip.get_updates(len(self._membership.probeable_members()) + 1)
         msg = messages.alive(
             self._cfg.node_id, self._next_seq(),
             self._cfg.node_id, self._incarnation, gp
         )
-        # Broadcast to all known live members.
-        for member in self._membership.alive_members():
-            await self._transport.send_udp(msg, member.addr())
+        # Broadcast to all probeable (ALIVE + SUSPECT) members (item B.6).
+        for member in self._membership.probeable_members():
+            await self._transport.send_udp(msg, member.addr(),
+                                           target_node_id=member.node_id)
 
-    # ── Utilities ─────────────────────────────────────────────────────────────
+    # -- Utilities -------------------------------------------------------------
 
     def _next_seq(self) -> int:
         self._seq += 1

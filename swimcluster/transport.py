@@ -1,13 +1,13 @@
 """
-transport.py – UDP socket for probes/gossip, TCP for full-state sync.
+transport.py -- UDP socket for probes/gossip, TCP for full-state sync.
 
 Design decisions:
-  • UDP is used for probes and gossip because they are small, latency-
+  * UDP is used for probes and gossip because they are small, latency-
     sensitive, and the SWIM protocol already handles loss through
     timeouts and retransmission at the application layer.
-  • TCP is used only for the JOIN handshake where we need reliable
+  * TCP is used only for the JOIN handshake where we need reliable
     delivery of the full (potentially large) membership list.
-  • The Transport interface is deliberately thin so that tests can
+  * The Transport interface is deliberately thin so that tests can
     swap in an InMemoryTransport without touching any protocol logic.
 """
 
@@ -17,7 +17,7 @@ import asyncio
 import logging
 from typing import Any, Awaitable, Callable, Dict, Optional, Tuple
 
-from swimcluster import messages
+from swimcluster import messages, metrics
 
 log = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ log = logging.getLogger(__name__)
 Handler = Callable[[Dict[str, Any], Tuple[str, int]], Awaitable[None]]
 
 
-# ── Abstract interface ────────────────────────────────────────────────────────
+# -- Abstract interface --------------------------------------------------------
 
 class BaseTransport:
     """
@@ -40,7 +40,8 @@ class BaseTransport:
     async def stop(self) -> None:
         raise NotImplementedError
 
-    async def send_udp(self, msg: Dict[str, Any], addr: Tuple[str, int]) -> None:
+    async def send_udp(self, msg: Dict[str, Any], addr: Tuple[str, int],
+                       target_node_id: str = "") -> None:
         raise NotImplementedError
 
     async def send_tcp(self, msg: Dict[str, Any], addr: Tuple[str, int]) -> Optional[Dict[str, Any]]:
@@ -55,7 +56,7 @@ class BaseTransport:
         raise NotImplementedError
 
 
-# ── Real UDP/TCP transport ────────────────────────────────────────────────────
+# -- Real UDP/TCP transport ----------------------------------------------------
 
 class UDPProtocol(asyncio.DatagramProtocol):
     """asyncio DatagramProtocol that delegates received datagrams to SWIM."""
@@ -72,6 +73,12 @@ class UDPProtocol(asyncio.DatagramProtocol):
         msg = messages.decode(data)
         if msg is None or not messages.validate(msg):
             log.debug("Dropping malformed UDP datagram from %s", addr)
+            metrics.messages_dropped_malformed.inc()
+            return
+        # Check if the sender is partitioned with this node (receive side).
+        sender_id = msg.get("sender", "")
+        if self._fault and sender_id and self._fault._is_partitioned(sender_id):
+            log.debug("Fault: receive-side partition dropping datagram from %s", sender_id)
             return
         # Schedule the async handler on the running loop.
         asyncio.get_event_loop().create_task(self._handler(msg, addr))
@@ -96,6 +103,8 @@ class RealTransport(BaseTransport):
         self._udp_transport: Optional[asyncio.DatagramTransport] = None
         self._tcp_server: Optional[asyncio.AbstractServer] = None
         self._handler_fn: Optional[Handler] = None
+        # Staging slot for TCP reply -- always defined, never hasattr-checked.
+        self._pending_tcp_reply: Optional[Dict] = None
 
     def set_handler(self, handler: Handler) -> None:  # type: ignore[override]
         self._handler_fn = handler
@@ -125,9 +134,16 @@ class RealTransport(BaseTransport):
             self._tcp_server.close()
             await self._tcp_server.wait_closed()
 
-    async def send_udp(self, msg: Dict[str, Any], addr: Tuple[str, int]) -> None:
-        """Encode and fire a UDP datagram, applying fault injection if configured."""
-        if self._fault and not await self._fault.allow_send(addr):
+    async def send_udp(self, msg: Dict[str, Any], addr: Tuple[str, int],
+                       target_node_id: str = "") -> None:
+        """Encode and fire a UDP datagram, applying fault injection if configured.
+
+        target_node_id is the logical node ID of the recipient; FaultLayer
+        checks partitions/loss against node IDs, not IP addresses.
+        """
+        # Use node ID for fault layer checks when available.
+        fault_target = target_node_id if target_node_id else addr[0]
+        if self._fault and not await self._fault.allow_send_to_node(fault_target):
             return  # packet dropped by fault injector
 
         data = messages.encode(msg)
@@ -170,12 +186,14 @@ class RealTransport(BaseTransport):
             msg = messages.decode(raw.strip())
             if msg is None or not messages.validate(msg):
                 log.debug("Dropping malformed TCP message from %s", addr)
+                metrics.messages_dropped_malformed.inc()
                 return
+            # Reset the reply slot before handling so we can detect new replies.
+            self._pending_tcp_reply = None
             await self._dispatch(msg, addr)
 
-            # If the handler put a reply on the queue, send it.
-            # (Handled via _tcp_reply_queue in Node.)
-            if hasattr(self, "_pending_tcp_reply") and self._pending_tcp_reply:
+            # If the handler stored a reply, send it.
+            if self._pending_tcp_reply:
                 reply = self._pending_tcp_reply
                 self._pending_tcp_reply = None
                 writer.write(messages.encode(reply) + b"\n")
@@ -195,7 +213,7 @@ class RealTransport(BaseTransport):
             await self._handler_fn(msg, addr)
 
 
-# ── In-memory transport (for tests) ──────────────────────────────────────────
+# -- In-memory transport (for tests) ------------------------------------------
 
 class InMemoryTransport(BaseTransport):
     """
@@ -203,7 +221,7 @@ class InMemoryTransport(BaseTransport):
 
     Instead of real sockets, messages are delivered synchronously (via
     asyncio.gather) so tests can reason about ordering without sleep().
-    A shared registry maps node_id → InMemoryTransport so nodes can
+    A shared registry maps node_id -> InMemoryTransport so nodes can
     address each other by ID alone.
     """
 
@@ -220,6 +238,10 @@ class InMemoryTransport(BaseTransport):
         self._fault      = fault_layer
         self._handler_fn: Optional[Handler] = None
         self._inbox: asyncio.Queue = asyncio.Queue()
+        # Staging slot for TCP reply (in-memory path).
+        self._tcp_reply: Optional[Dict] = None
+        # Mirrors RealTransport's attribute so node.py can always write it.
+        self._pending_tcp_reply: Optional[Dict] = None
 
     def set_handler(self, handler: Handler) -> None:  # type: ignore[override]
         self._handler_fn = handler
@@ -231,14 +253,21 @@ class InMemoryTransport(BaseTransport):
     async def stop(self) -> None:
         InMemoryTransport._registry.pop(self.node_id, None)
 
-    async def send_udp(self, msg: Dict[str, Any], addr: Tuple[str, int]) -> None:
-        """Deliver a message to the target node's handler in-process."""
-        target_id = addr[0]  # In tests, addr[0] is used as node_id.
+    async def send_udp(self, msg: Dict[str, Any], addr: Tuple[str, int],
+                       target_node_id: str = "") -> None:
+        """Deliver a message to the target node's handler in-process.
+
+        target_node_id, if provided, overrides addr[0] for fault checks and
+        registry lookup, matching how real nodes address each other by ID.
+        """
+        target_id = target_node_id if target_node_id else addr[0]
         target    = InMemoryTransport._registry.get(target_id)
         if target is None:
-            return  # node not started yet – drop silently
+            return  # node not started yet -- drop silently
 
-        if self._fault and not await self._fault.allow_send(addr):
+        # Use node ID for fault layer checks.
+        fault_target = target_node_id if target_node_id else addr[0]
+        if self._fault and not await self._fault.allow_send_to_node(fault_target):
             return
 
         if target._handler_fn:
@@ -246,12 +275,24 @@ class InMemoryTransport(BaseTransport):
 
     async def send_tcp(self, msg: Dict[str, Any],
                        addr: Tuple[str, int]) -> Optional[Dict[str, Any]]:
-        """Synchronous in-memory TCP: deliver and get reply."""
+        """Synchronous in-memory TCP: deliver and get reply.
+
+        The handler may be either:
+          - swim.handle_message (returns the reply directly), or
+          - node._dispatch (returns None but sets _pending_tcp_reply).
+        We check the return value first, then fall back to the staging slots.
+        """
         target_id = addr[0]
         target    = InMemoryTransport._registry.get(target_id)
         if target is None or target._handler_fn is None:
             return None
-        # Store the last TCP reply set by the remote handler.
-        target._last_tcp_msg = msg
-        await target._handler_fn(msg, (self.node_id, addr[1]))
-        return getattr(target, "_tcp_reply", None)
+        # Reset reply slots before invoking.
+        target._tcp_reply = None
+        target._pending_tcp_reply = None
+        result = await target._handler_fn(msg, (self.node_id, addr[1]))
+        # swim.handle_message returns the reply dict directly.
+        if result is not None:
+            return result
+        # node._dispatch stores the reply in _pending_tcp_reply.
+        return target._pending_tcp_reply or target._tcp_reply
+
