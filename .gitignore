@@ -1,0 +1,20 @@
+# Python bytecode & cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Egg info & build artifacts
+*.egg-info/
+build/
+dist/
+
+# Test & coverage artifacts
+.pytest_cache/
+.hypothesis/
+.coverage
+htmlcov/
+
+# Local runtime data & events
+data/
+events*.jsonl
