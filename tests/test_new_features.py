@@ -367,3 +367,28 @@ async def test_self_refutation_via_gossip():
 
     await transport.stop()
     await n2_t.stop()
+
+
+def test_node_stays_alive_after_load_from_list_with_stale_dead_record():
+    """
+    Item A.7: A node created with a startup incarnation greater than a stale
+    DEAD record at a lower incarnation for the same node id must stay ALIVE
+    after load_from_list of a seed snapshot that contains that DEAD record.
+    """
+    node_id = "rejoining_node"
+    startup_inc = 1000
+    ml = MembershipList(node_id)
+    ml.mark_alive(node_id, "127.0.0.1", 7946, startup_inc)
+
+    # Seed snapshot contains stale DEAD record for this node at lower incarnation.
+    seed_snapshot = [
+        {"id": "seed", "host": "127.0.0.1", "port": 7945, "state": "ALIVE", "incarnation": 0},
+        {"id": node_id, "host": "127.0.0.1", "port": 7946, "state": "DEAD", "incarnation": 5},
+    ]
+
+    ml.load_from_list(seed_snapshot)
+
+    local_entry = ml.get(node_id)
+    assert local_entry is not None
+    assert local_entry.state == NodeState.ALIVE
+    assert local_entry.incarnation == startup_inc
