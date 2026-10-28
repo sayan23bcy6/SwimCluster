@@ -302,6 +302,9 @@ async def test_real_socket_rejoin_after_dead():
 
         # Restart node2 with same ID -- incarnation starts from time.time() so
         # it will be higher than when it was first alive.
+        while int(time.time()) <= node2._swim.incarnation:
+            await asyncio.sleep(0.1)
+
         node2_restart = _make_node("rejoin2", node2_ports[0], node2_ports[1],
                                     seeds=[f"127.0.0.1:{ports[0][0]}"])
         await node2_restart.start()
