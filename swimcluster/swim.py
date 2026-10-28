@@ -420,7 +420,10 @@ class SWIM:
         sender_id = msg["sender"]
         host      = msg["host"]
         port      = msg["port"]
-        self._membership.mark_alive(sender_id, host, port, 0)
+        inc       = msg.get("incarnation", 0)
+        if not isinstance(inc, int):
+            inc = 0
+        self._membership.mark_alive(sender_id, host, port, inc)
         self._enqueue_gossip(self._membership.get(sender_id))
         self._update_member_gauges()
         log.info("Node %s joined from %s:%s", sender_id, host, port)
