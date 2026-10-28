@@ -178,7 +178,7 @@ class Node:
 
     async def _handle_metrics(self, _: web.Request) -> web.Response:
         body, ctype = metrics.scrape()
-        return web.Response(body=body, content_type=ctype)
+        return web.Response(body=body, headers={"Content-Type": ctype})
 
     async def _handle_kv_get(self, req: web.Request) -> web.Response:
         key = req.match_info["key"]
