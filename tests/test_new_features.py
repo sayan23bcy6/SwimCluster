@@ -110,6 +110,8 @@ async def test_join_ack_reaches_joiner_via_inmemory():
     assert seed_in_joiner is not None, "Joiner did not learn seed's membership"
     assert seed_in_joiner.state == NodeState.ALIVE
 
+    await seed_swim.stop()
+    await joiner_swim.stop()
     await seed_t.stop()
     await joiner_t.stop()
 
@@ -161,6 +163,7 @@ async def test_resuspicion_after_refutation_starts_new_timer():
     assert "n2" in swim_n1._suspect_timers, "Second suspicion did not start a new timer"
 
     for nid, (s, t, m, c) in nodes.items():
+        await s.stop()
         await t.stop()
 
 
@@ -187,6 +190,7 @@ async def test_dead_clears_suspect_timer():
     assert membership_n1.get("n2").state == NodeState.DEAD
 
     for nid, (s, t, m, c) in nodes.items():
+        await s.stop()
         await t.stop()
 
 
@@ -227,6 +231,7 @@ async def test_rejoin_after_being_marked_dead():
     assert n2_state.incarnation == rejoin_inc
 
     for nid, (s, t, m, c) in nodes.items():
+        await s.stop()
         await t.stop()
 
 
@@ -365,6 +370,7 @@ async def test_self_refutation_via_gossip():
     assert local_m.state == NodeState.ALIVE
     assert local_m.incarnation == swim_inst._incarnation
 
+    await swim_inst.stop()
     await transport.stop()
     await n2_t.stop()
 
