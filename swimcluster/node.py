@@ -72,6 +72,8 @@ class Node:
         # RealTransport also has this attribute; we keep it in sync during dispatch.
         self._pending_tcp_reply: Optional[Dict] = None
 
+        self._metrics_task: Optional[asyncio.Task] = None
+
         # Event log file.
         self._event_log_path = cfg.event_log_path
 
@@ -99,13 +101,22 @@ class Node:
                  self._cfg.host, self._cfg.http_port)
 
         # Periodic membership gauge update.
-        asyncio.get_event_loop().create_task(self._metrics_loop())
+        self._metrics_task = asyncio.create_task(self._metrics_loop())
 
     async def stop(self) -> None:
+        if self._metrics_task:
+            self._metrics_task.cancel()
+            try:
+                await self._metrics_task
+            except asyncio.CancelledError:
+                pass
+            self._metrics_task = None
+
         await self._swim.stop()
         await self._transport.stop()
         if self._runner:
             await self._runner.cleanup()
+            self._runner = None
 
     # -- Join ------------------------------------------------------------------
 
