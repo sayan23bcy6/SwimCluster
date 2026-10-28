@@ -52,12 +52,13 @@ class Node:
 
         # Add ourselves to the member list as ALIVE using the *advertised* host.
         advertise_host = cfg.effective_advertise_host()
+        startup_inc = int(time.time())
         self._membership.mark_alive(
-            cfg.node_id, advertise_host, cfg.port, incarnation=0
+            cfg.node_id, advertise_host, cfg.port, incarnation=startup_inc
         )
 
         # SWIM failure detector.
-        self._swim = SWIM(cfg, self._transport, self._membership)
+        self._swim = SWIM(cfg, self._transport, self._membership, incarnation=startup_inc)
         self._swim.set_event_log(self._log_event)
 
         # KV store.
