@@ -125,7 +125,8 @@ class Node:
         addr_host = local_m.host if local_m else advertise_host
         addr_port = local_m.port if local_m else self._cfg.port
 
-        msg = messages.join(self._cfg.node_id, 1, addr_host, addr_port)
+        msg = messages.join(self._cfg.node_id, 1, addr_host, addr_port,
+                            incarnation=self._swim.incarnation)
         log.info("Joining cluster via seed %s:%s", host, port)
         reply = await self._transport.send_tcp(msg, (host, port))
         if reply and messages.validate(reply):
