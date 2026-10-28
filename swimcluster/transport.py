@@ -282,6 +282,11 @@ class InMemoryTransport(BaseTransport):
         if self._fault and not await self._fault.allow_send_to_node(fault_target):
             return
 
+        # Check receiver-side partition (matching RealTransport UDPProtocol).
+        sender_id = msg.get("sender", self.node_id)
+        if target._fault and sender_id and target._fault._is_partitioned(sender_id):
+            return
+
         if target._handler_fn:
             await target._handler_fn(msg, (self.node_id, addr[1]))
 

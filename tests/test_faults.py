@@ -108,3 +108,50 @@ def test_set_delay():
     fl.set_delay(0.01, 0.05)
     assert fl.config.delay_min == 0.01
     assert fl.config.delay_max == 0.05
+
+
+@pytest.mark.asyncio
+async def test_partition_on_node1_blocks_bidirectional_by_node_id():
+    """
+    Item D.11: A partition added on node1 blocks traffic in both directions
+    (outgoing from node1 and incoming to node1 from the partitioned peer),
+    and is matched by node ID, not IP.
+    """
+    from swimcluster.transport import InMemoryTransport
+    from swimcluster.messages import ping
+
+    InMemoryTransport.reset()
+    fault1 = FaultLayer("node1")
+    fault2 = FaultLayer("node2")
+    t1 = InMemoryTransport("node1", fault_layer=fault1)
+    t2 = InMemoryTransport("node2", fault_layer=fault2)
+
+    received_at_1 = []
+    received_at_2 = []
+
+    async def handler1(msg, addr):
+        received_at_1.append(msg)
+
+    async def handler2(msg, addr):
+        received_at_2.append(msg)
+
+    t1.set_handler(handler1)
+    t2.set_handler(handler2)
+    await t1.start()
+    await t2.start()
+
+    # Partition node1 and node2 ONLY on node1
+    fault1.add_partition("node1", "node2")
+
+    # Send outgoing from node1 to node2 (using IP address in addr, but node_id in target_node_id)
+    msg1 = ping("node1", 1, "node2")
+    await t1.send_udp(msg1, ("192.168.1.2", 7946), target_node_id="node2")
+    assert len(received_at_2) == 0, "Outgoing from node1 should be blocked"
+
+    # Send incoming from node2 to node1
+    msg2 = ping("node2", 2, "node1")
+    await t2.send_udp(msg2, ("192.168.1.1", 7946), target_node_id="node1")
+    assert len(received_at_1) == 0, "Incoming to node1 should be blocked"
+
+    await t1.stop()
+    await t2.stop()
