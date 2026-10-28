@@ -68,6 +68,16 @@ async def _wait_for_state(membership, node_id: str, state: NodeState,
     return False
 
 
+async def _stop_nodes(*nodes: Optional[Node]) -> None:
+    """Stop a collection of nodes safely, ignoring None and errors."""
+    for n in nodes:
+        if n is not None:
+            try:
+                await n.stop()
+            except Exception:
+                pass
+
+
 # ── item 19a: Full membership convergence with real sockets ───────────────────
 
 @pytest.mark.integration
@@ -79,14 +89,15 @@ async def test_real_socket_three_nodes_converge():
     becomes SUSPECT then DEAD on the others within a bounded time (item 19a).
     """
     ports = _alloc_ports(3)
-
-    node1 = _make_node("rn1", ports[0][0], ports[0][1])
-    node2 = _make_node("rn2", ports[1][0], ports[1][1],
-                        seeds=[f"127.0.0.1:{ports[0][0]}"])
-    node3 = _make_node("rn3", ports[2][0], ports[2][1],
-                        seeds=[f"127.0.0.1:{ports[0][0]}"])
+    node1 = node2 = node3 = None
 
     try:
+        node1 = _make_node("rn1", ports[0][0], ports[0][1])
+        node2 = _make_node("rn2", ports[1][0], ports[1][1],
+                            seeds=[f"127.0.0.1:{ports[0][0]}"])
+        node3 = _make_node("rn3", ports[2][0], ports[2][1],
+                            seeds=[f"127.0.0.1:{ports[0][0]}"])
+
         await node1.start()
         await asyncio.sleep(0.3)
         await node2.start()
@@ -134,12 +145,7 @@ async def test_real_socket_three_nodes_converge():
             assert n3_suspect_on_n2, "rn3 never became SUSPECT or DEAD on node2"
 
     finally:
-        try:
-            await node3.stop()
-        except Exception:
-            pass
-        await node2.stop()
-        await node1.stop()
+        await _stop_nodes(node3, node2, node1)
 
 
 # ── item 19b: /metrics returns HTTP 200 ──────────────────────────────────────
@@ -154,9 +160,10 @@ async def test_metrics_endpoint_returns_200():
     import aiohttp
 
     ports = _alloc_ports(1)
-    node = _make_node("mnode1", ports[0][0], ports[0][1])
+    node = None
 
     try:
+        node = _make_node("mnode1", ports[0][0], ports[0][1])
         await node.start()
         await asyncio.sleep(0.2)
 
@@ -169,7 +176,7 @@ async def test_metrics_endpoint_returns_200():
                 body = await resp.text()
                 assert "swimcluster" in body, "No swimcluster metrics in /metrics output"
     finally:
-        await node.stop()
+        await _stop_nodes(node)
 
 
 # ── item 19c: /health returns 200 ────────────────────────────────────────────
@@ -181,9 +188,10 @@ async def test_health_endpoint_returns_200():
     import aiohttp
 
     ports = _alloc_ports(1)
-    node = _make_node("hnode1", ports[0][0], ports[0][1])
+    node = None
 
     try:
+        node = _make_node("hnode1", ports[0][0], ports[0][1])
         await node.start()
         await asyncio.sleep(0.2)
 
@@ -194,7 +202,7 @@ async def test_health_endpoint_returns_200():
                 data = await resp.json()
                 assert data.get("status") == "ok"
     finally:
-        await node.stop()
+        await _stop_nodes(node)
 
 
 # ── item 19d: Partition test ──────────────────────────────────────────────────
@@ -207,12 +215,13 @@ async def test_partition_causes_suspicion_then_recovery():
     Heal and verify recovery (item 19d).
     """
     ports = _alloc_ports(2)
-
-    node1 = _make_node("pnode1", ports[0][0], ports[0][1])
-    node2 = _make_node("pnode2", ports[1][0], ports[1][1],
-                        seeds=[f"127.0.0.1:{ports[0][0]}"])
+    node1 = node2 = None
 
     try:
+        node1 = _make_node("pnode1", ports[0][0], ports[0][1])
+        node2 = _make_node("pnode2", ports[1][0], ports[1][1],
+                            seeds=[f"127.0.0.1:{ports[0][0]}"])
+
         await node1.start()
         await asyncio.sleep(0.3)
         await node2.start()
@@ -250,8 +259,7 @@ async def test_partition_causes_suspicion_then_recovery():
             "pnode2 itself should still be ALIVE after heal"
 
     finally:
-        await node2.stop()
-        await node1.stop()
+        await _stop_nodes(node2, node1)
 
 
 # ── item 19e: Rejoin test from item B.5 ──────────────────────────────────────
@@ -264,15 +272,15 @@ async def test_real_socket_rejoin_after_dead():
     Uses real sockets with 127.0.0.1.
     """
     ports = _alloc_ports(2)
-
-    node1 = _make_node("rejoin1", ports[0][0], ports[0][1])
-    node2_ports = ports[1]
+    node1 = node2 = node2_restart = None
 
     try:
+        node1 = _make_node("rejoin1", ports[0][0], ports[0][1])
         await node1.start()
         await asyncio.sleep(0.2)
 
         # Start node2, let it join.
+        node2_ports = ports[1]
         node2 = _make_node("rejoin2", node2_ports[0], node2_ports[1],
                             seeds=[f"127.0.0.1:{ports[0][0]}"])
         await node2.start()
@@ -305,8 +313,4 @@ async def test_real_socket_rejoin_after_dead():
         assert n2_back_alive, "node2 did not return to ALIVE after restart"
 
     finally:
-        try:
-            await node2_restart.stop()  # type: ignore[possibly-undefined]
-        except Exception:
-            pass
-        await node1.stop()
+        await _stop_nodes(node2_restart, node2, node1)
