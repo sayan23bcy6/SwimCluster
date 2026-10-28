@@ -409,3 +409,22 @@ async def test_node_stop_is_idempotent():
     await node.start()
     await node.stop()
     await node.stop()  # Second call must not raise
+
+
+def test_agent_reads_all_events_in_directory(tmp_path):
+    """Item D.7: Agent reads all events-*.jsonl files in a directory."""
+    import json
+    import time
+    from swimcluster.agent import read_events
+
+    now = time.time()
+    file1 = tmp_path / "events-node1.jsonl"
+    file2 = tmp_path / "events-node2.jsonl"
+
+    file1.write_text(json.dumps({"event": "SUSPECT", "node_id": "node2", "ts": now - 10}) + "\n")
+    file2.write_text(json.dumps({"event": "DEAD", "node_id": "node2", "ts": now - 5}) + "\n")
+
+    events = read_events(str(tmp_path), window_seconds=60)
+    assert len(events) == 2
+    assert events[0]["event"] == "SUSPECT"
+    assert events[1]["event"] == "DEAD"

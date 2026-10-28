@@ -117,7 +117,12 @@ def _expand_event_paths(path_or_glob: str) -> List[str]:
     """
     p = Path(path_or_glob)
     if p.is_dir():
-        return sorted(str(f) for f in p.glob("*.jsonl"))
+        matches = sorted(str(f) for f in p.glob("events-*.jsonl"))
+        return matches if matches else sorted(str(f) for f in p.glob("*.jsonl"))
+    if not p.exists() and Path("data").is_dir():
+        matches = sorted(str(f) for f in Path("data").glob("events-*.jsonl"))
+        if matches:
+            return matches
     expanded = glob_module.glob(path_or_glob)
     if expanded:
         return sorted(expanded)
