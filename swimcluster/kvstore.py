@@ -7,9 +7,10 @@ Consistent hashing maps keys to cluster members by:
   3. Walking clockwise to find the first virtual node whose position ≥ key hash.
 
 When membership changes (a node joins, dies, or becomes alive again), the
-ring is rebuilt and keys that now map to a different node are flagged.
-Each node owns the full key-value data but only considers itself the
-"primary" for keys that hash to it.
+ring is rebuilt. Each node keeps its own local copy of data; consistent
+hashing computes an owner per key, which is reported in responses, but
+requests are not forwarded to the owner and data is not migrated when
+membership changes.
 
 HTTP endpoints (handled in node.py):
   GET  /kv/{key}

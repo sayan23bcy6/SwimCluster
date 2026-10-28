@@ -42,10 +42,16 @@ recommends for robustness vs. overhead.
 
 ## 3. Incarnation Numbers and Refutation
 
-Every member has an incarnation number starting at 0.  When a node is
-suspected, the suspicion carries that number.  The suspected node
-**refutes** by incrementing its incarnation and broadcasting ALIVE with
-the new number.
+Every member tracks an incarnation number. When a node starts up or restarts,
+it initializes its local incarnation to the current Unix timestamp
+(`int(time.time())`). This allows a restarted node to immediately rejoin the
+cluster with an incarnation strictly greater than any stale DEAD record
+recorded during an earlier run.
+
+Within the lifetime of a running process, incarnation numbers advance
+logically: when a node sees itself suspected, the suspicion carries that
+incarnation number. The suspected node **refutes** by incrementing its
+incarnation (`self._incarnation += 1`) and broadcasting ALIVE with the new number.
 
 Conflict resolution is total:
   1. Higher incarnation always wins.
@@ -53,9 +59,6 @@ Conflict resolution is total:
 
 This makes state merging idempotent and commutative: it does not matter
 in what order gossip updates arrive; the result is always the same.
-
-Why not use a simple timestamp?  Clocks drift.  Incarnation numbers are
-logical, not wall-clock, so they are safe across restarts and clock skew.
 
 ---
 
@@ -117,10 +120,10 @@ With consistent hashing, adding or removing one node remaps only `N/K`
 keys on average, and virtual nodes (150 per physical node by default)
 spread load evenly.
 
-Each node stores all keys locally.  The ring determines ownership for
-routing decisions (which node is primary), not data replication.  A
-production system would add replica placement; that complexity is omitted
-for clarity.
+Each node keeps its own local copy of data; consistent hashing computes an
+owner per key, which is reported in responses, but requests are not forwarded
+to the owner and data is not migrated when membership changes. Ownership is
+informational only.
 
 ---
 
@@ -149,7 +152,8 @@ is dangerous; a human should always approve remediation.
 The LLM provider is hidden behind a `LLMProvider` interface with a single
 `complete(prompt)` method.  Tests use `FakeLLMProvider` which returns a
 fixed response without network calls.  The real implementation uses
-`aiohttp` to call the Anthropic API — no SDK dependency.
+`aiohttp` to call the Google Gemini REST API (`gemini-2.0-flash-lite`) using
+the `GEMINI_API_KEY` passed in the `x-goog-api-key` header — no external SDK dependency.
 
 Prompt engineering: the agent is given only a bounded time window of
 event data and the current metrics snapshot.  Sending unbounded history
@@ -166,3 +170,13 @@ any blocking call (e.g., file I/O in the event log writer) would stall
 the loop.  The event logger uses synchronous file writes and is called
 infrequently enough that this is acceptable.  A production system would
 use `loop.run_in_executor()` or an async file library.
+
+---
+
+## 11. What We'd Do Next
+
+If extending SwimCluster further, the top priorities would be:
+  - **Routed Key-Value Service**: Forward KV requests to the designated hash-ring owner node over HTTP and migrate keys when membership changes.
+  - **Persistent Incarnations**: Persist incarnation counters to disk across process restarts to avoid reliance on wall-clock startup timestamps.
+  - **Probing DEAD Members for Faster Recovery**: Periodically probe a small random sample of DEAD members so that unpaused nodes or nodes that missed rejoin broadcasts can be rediscovered without waiting for external contact.
+  - **Kubernetes Support**: Package SwimCluster with Helm charts or a custom Kubernetes operator using headless services or pod IPs for discovery.
