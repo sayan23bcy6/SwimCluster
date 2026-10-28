@@ -392,3 +392,14 @@ def test_node_stays_alive_after_load_from_list_with_stale_dead_record():
     assert local_entry is not None
     assert local_entry.state == NodeState.ALIVE
     assert local_entry.incarnation == startup_inc
+
+
+@pytest.mark.asyncio
+async def test_node_stop_is_idempotent():
+    """Item B.3: Calling Node.stop() twice must not raise."""
+    from swimcluster.node import Node
+    cfg = make_config("idempotent_node", host="127.0.0.1", port=29000, http_port=29001)
+    node = Node(cfg, transport=InMemoryTransport("idempotent_node"))
+    await node.start()
+    await node.stop()
+    await node.stop()  # Second call must not raise

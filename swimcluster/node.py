@@ -73,6 +73,7 @@ class Node:
         self._pending_tcp_reply: Optional[Dict] = None
 
         self._metrics_task: Optional[asyncio.Task] = None
+        self._stopped = False
 
         # Event log file.
         self._event_log_path = cfg.event_log_path
@@ -104,6 +105,10 @@ class Node:
         self._metrics_task = asyncio.create_task(self._metrics_loop())
 
     async def stop(self) -> None:
+        if self._stopped:
+            return
+        self._stopped = True
+
         if self._metrics_task:
             self._metrics_task.cancel()
             try:
