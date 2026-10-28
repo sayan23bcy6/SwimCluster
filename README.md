@@ -53,10 +53,15 @@ flowchart TD
 
 ## Quick Start
 
+The project targets Python 3.11.
+
 ### Run tests
 
 ```bash
 pip install -r requirements.txt
+# For Windows users:
+py -3.11 -m pip install -r requirements.txt
+
 pytest --tb=short -v
 ```
 
