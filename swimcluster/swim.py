@@ -48,7 +48,7 @@ class SWIM:
     """
 
     def __init__(self, cfg: Config, transport: BaseTransport,
-                 membership: MembershipList) -> None:
+                 membership: MembershipList, incarnation: int = 0) -> None:
         self._cfg         = cfg
         self._transport   = transport
         self._membership  = membership
@@ -73,15 +73,18 @@ class SWIM:
         self._running = False
 
         # Local member's current incarnation (for self-refutation).
-        # Initialize to max(0, current unix time) so a restarted node always
-        # has a higher incarnation than its previous run (item B.5).
-        self._incarnation = max(0, int(time.time()))
+        self._incarnation = incarnation
 
         # Probing round-robin shuffle.
         self._probe_index = 0
 
         # Event log callback (set by node.py).
         self._event_log_cb = None
+
+    @property
+    def incarnation(self) -> int:
+        """Current incarnation number of the local node."""
+        return self._incarnation
 
     # -- Lifecycle -------------------------------------------------------------
 
