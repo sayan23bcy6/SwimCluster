@@ -14,6 +14,7 @@ Design decisions:
 from __future__ import annotations
 
 import asyncio
+import errno
 import logging
 from typing import Any, Awaitable, Callable, Dict, Optional, Tuple
 
@@ -81,10 +82,21 @@ class UDPProtocol(asyncio.DatagramProtocol):
             log.debug("Fault: receive-side partition dropping datagram from %s", sender_id)
             return
         # Schedule the async handler on the running loop.
-        asyncio.get_event_loop().create_task(self._handler(msg, addr))
+        asyncio.create_task(self._handler(msg, addr))
 
     def error_received(self, exc: Exception) -> None:
-        log.warning("UDP error: %s", exc)
+        is_port_unreachable = isinstance(
+            exc, (ConnectionRefusedError, ConnectionResetError)
+        )
+        if isinstance(exc, OSError):
+            code = getattr(exc, "winerror", None) or exc.errno
+            if code in (errno.ECONNREFUSED, 1234, 10054, 10061):
+                is_port_unreachable = True
+
+        if is_port_unreachable:
+            log.debug("UDP error (peer unreachable): %s", exc)
+        else:
+            log.warning("UDP error: %s", exc)
 
 
 class RealTransport(BaseTransport):
