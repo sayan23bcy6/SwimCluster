@@ -213,6 +213,8 @@ class MembershipList:
         """
         for rec in records:
             try:
+                if rec.get("id") == self.local_id:
+                    continue
                 m = Member.from_dict(rec)
                 self.upsert(m)
             except (KeyError, ValueError):
