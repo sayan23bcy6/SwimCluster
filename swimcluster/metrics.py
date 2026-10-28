@@ -9,7 +9,7 @@ The HTTP handler for /metrics is wired into the aiohttp server in node.py.
 
 Convergence metric:
   swimcluster_convergence_time_seconds tracks "Time from first SUSPECT to DEAD
-  observed by this node".  It is observed once per DEAD event with the elapsed
+  as observed by this node".  It is observed once per DEAD event with the elapsed
   seconds between the first SUSPECT event and the DEAD declaration.
 """
 
@@ -83,7 +83,7 @@ members_dead = Gauge(
 
 convergence_time_seconds = Histogram(
     "swimcluster_convergence_time_seconds",
-    "Time from first SUSPECT to DEAD observed by this node",
+    "Time from first SUSPECT to DEAD as observed by this node",
     buckets=(0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0),
 )
 
