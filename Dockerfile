@@ -15,9 +15,10 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 COPY requirements.txt pyproject.toml ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy source and install the package in editable mode.
+# Copy source and install the package as a normal install.
+COPY README.md ./
 COPY swimcluster/ swimcluster/
-RUN pip install --no-cache-dir -e .
+RUN pip install --no-cache-dir .
 
 # ── Runtime image ─────────────────────────────────────────────────────────────
 FROM python:3.11-slim AS runtime
@@ -27,12 +28,11 @@ RUN groupadd -r swim && useradd -r -g swim swim
 
 WORKDIR /app
 
-# Copy installed packages from builder.
+# Copy installed packages and entrypoint from builder.
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin/swimcluster /usr/local/bin/swimcluster
-COPY --from=builder /app /app
 
-RUN chown -R swim:swim /app
+RUN mkdir -p /app/data && chown -R swim:swim /app
 
 USER swim
 
